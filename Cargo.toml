@@ -1,0 +1,30 @@
+[package]
+name = "hydepark"
+version = "0.1.0"
+authors = ["Michael Spector <spektom@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+# Replace with original once https://github.com/sfackler/rust-native-tls/pull/162 is pushed.
+# (what needed to be done in order to support TOFU authentication model is setting verification mode
+# to SslVerifyMode::PEER, and configuring SSL verify callback that returns constant true).
+#async-native-tls = "0.3"
+async-native-tls = { git = "https://github.com/spektom/async-native-tls", branch = "tofu" }
+async-std = "1"
+async-trait = "0.1"
+chrono = "0.4"
+chrono-humanize = "0.1"
+env_logger = "0.8"
+fomat-macros = "0.3.1"
+futures = "0.3"
+lazy_static = "1.4"
+log = "0.4"
+percent-encoding = "2.1"
+rand = "0.8"
+rust-crypto = "0.2"
+rusqlite = "0.24"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+structopt = "0.3"
+url = "2.2"
+x509-parser = { version = "0.9", features = ["verify"] }
