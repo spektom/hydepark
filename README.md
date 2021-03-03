@@ -7,7 +7,12 @@ A discussion forum application for [Gemini](https://gemini.circumlunar.space).
 
 ### Compilation
 
-You need [Rust](https://www.rust-lang.org) to compile Hydepark. Once you have it, run:
+As a prerequisite, the following dependencies must be installed:
+ 
+ * libsqlite3-dev
+ * libssl-dev
+
+Next, you'll need [Rust](https://www.rust-lang.org) to compile Hydepark. Once you have it, run:
 
     cargo build --release
 
