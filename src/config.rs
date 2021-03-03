@@ -67,6 +67,12 @@ pub struct Config {
 
     #[structopt(long, name = "Storage connection string", default_value = "sqlite://")]
     pub db_conn: String,
+
+    #[structopt(long, name = "Topics to show in one page", default_value = "10")]
+    pub topics_per_page: u8,
+
+    #[structopt(long, name = "Messages to show in one page", default_value = "10")]
+    pub messages_per_page: u8,
 }
 
 impl Config {

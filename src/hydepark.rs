@@ -38,9 +38,6 @@ pub struct Hydepark {
 }
 
 impl Hydepark {
-    const TOPICS_ON_PAGE: u8 = 10;
-    const MESSAGES_ON_PAGE: u8 = 10;
-
     pub fn new(config: Config, storage: Box<dyn Storage>) -> Hydepark {
         Hydepark { config, storage }
     }
@@ -56,6 +53,7 @@ impl Hydepark {
             ))
     }
 
+    /// Access a session context stored for current user using callback `f`.
     async fn map_user_context<F, R>(&self, user: &User, f: F) -> R
     where
         F: FnOnce(&mut UserContext) -> R,
@@ -88,7 +86,7 @@ impl Hydepark {
                 .is_some()
             {
                 return Ok(Response::header(
-                    ResponseStatus::BadRequest,
+                    ResponseStatus::PermanentFailure,
                     "User with such name is already registered",
                 ));
             }
@@ -112,6 +110,10 @@ impl Hydepark {
         }
     }
 
+    /// Reqest to link a new client certificate with an existing account.
+    /// The method generates a new token, which is valid for 3 hours, and stores
+    /// it in current account. This token is used for authorization when
+    /// a request to /update-cert is made with the new client certificate.
     async fn update_cert_req(
         &self,
         request: &Request,
@@ -140,6 +142,8 @@ impl Hydepark {
         Ok(Response::text(body.as_str()))
     }
 
+    /// Link a new client certificate with an existing account. The method receives
+    /// a token generated in `update_cert_req`, and uses it for authorization.
     async fn update_cert(&self, request: &Request) -> std::result::Result<Response, RequestError> {
         let certificate = request.client_certificate()?;
         if self
@@ -149,7 +153,7 @@ impl Hydepark {
             .is_some()
         {
             return Ok(Response::header(
-                ResponseStatus::TemporaryFailure,
+                ResponseStatus::PermanentFailure,
                 "The certificate is already linked to a username",
             ));
         }
@@ -169,13 +173,13 @@ impl Hydepark {
             .cert_update_token(token)
             .await?
             .ok_or(RequestError::UserError(
-                ResponseStatus::TemporaryFailure,
+                ResponseStatus::PermanentFailure,
                 "Unrecognized certificate update token",
             ))?;
 
         if token.expires_on < Utc::now() {
             return Ok(Response::header(
-                ResponseStatus::TemporaryFailure,
+                ResponseStatus::PermanentFailure,
                 "The certificate update token is expired, please request a new one.",
             ));
         }
@@ -213,8 +217,8 @@ impl Hydepark {
             .storage
             .messages_by_topic(
                 topic.id as i64,
-                page * Self::MESSAGES_ON_PAGE as u64,
-                Self::MESSAGES_ON_PAGE,
+                page * self.config.messages_per_page as u64,
+                self.config.messages_per_page,
             )
             .await?;
         let body = fomat!("# " (topic.title) "\nLast updated " (topic.update_time.humanize())
@@ -222,7 +226,7 @@ impl Hydepark {
                 "\n\n### " (message.user_name) " wrote " (message.create_time.humanize()) "\n" (message.content)
             }
             "\n\n~~~"
-            if messages.len() as u8 == Self::MESSAGES_ON_PAGE {
+            if messages.len() as u8 == self.config.messages_per_page {
                 "\n\n=> " (self.config.base_url.as_str()) "/view-topic?t=" (topic.id) "&p=" (page + 1) " Next page"
             }
             if page > 0 {
@@ -240,14 +244,17 @@ impl Hydepark {
             let topic = self.param_topic(request).await?;
             self.map_user_context(&user, |ctx| ctx.current_topic = Some(topic))
                 .await;
-            return Ok(Response::header(ResponseStatus::Input, "New message:"));
+            return Ok(Response::header(
+                ResponseStatus::Input,
+                "Enter your message:",
+            ));
         }
 
         let topic = self
             .map_user_context(&user, |ctx| ctx.current_topic.clone())
             .await
             .ok_or(RequestError::UserError(
-                ResponseStatus::BadRequest,
+                ResponseStatus::PermanentFailure,
                 "Current topic is unknown",
             ))?;
 
@@ -269,7 +276,10 @@ impl Hydepark {
         let page = request.param_i64("p").unwrap_or(0) as u64;
         let topics = self
             .storage
-            .recent_topics(page * Self::TOPICS_ON_PAGE as u64, Self::TOPICS_ON_PAGE)
+            .recent_topics(
+                page * self.config.topics_per_page as u64,
+                self.config.topics_per_page,
+            )
             .await?;
         let body = fomat!(
             "# Welcome to Hydepark!\n\n"
@@ -279,7 +289,7 @@ impl Hydepark {
                 "\n=> " (self.config.base_url.as_str()) "/view-topic?t=" (topic.id) " " (topic.title)
             }
             "\n\n~~~"
-            if topics.len() as u8 == Self::TOPICS_ON_PAGE {
+            if topics.len() as u8 == self.config.topics_per_page {
                 "\n\n=> "(self.config.base_url.as_str()) "?p=" (page + 1) " Next page"
             }
             if page > 0 {
