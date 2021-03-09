@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use async_native_tls::{Certificate, TlsAcceptor, TlsStream};
 use async_std::{fs::File, net::TcpStream};
 use async_std::{net::TcpListener, prelude::*};
@@ -73,6 +75,7 @@ impl Server {
             &self.config,
             SessionContext {
                 certificate: stream.peer_certificate()?,
+                remote_addr: stream.get_ref().peer_addr()?,
             },
         )
         .await;
@@ -102,12 +105,7 @@ impl Server {
         request: std::result::Result<Request, RequestError>,
         response: Response,
     ) {
-        let remote_addr = stream
-            .get_ref()
-            .peer_addr()
-            .map(|addr| addr.to_string())
-            .unwrap_or_else(|_| String::from("Unknown"));
-
+        let remote_addr = stream.get_ref().peer_addr().unwrap().to_string();
         info!(
             "{} {} {}",
             remote_addr,
@@ -130,6 +128,7 @@ pub struct ClientCertificate {
 #[derive(Clone)]
 pub struct SessionContext {
     certificate: Option<Certificate>,
+    pub remote_addr: SocketAddr,
 }
 
 impl SessionContext {

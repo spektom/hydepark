@@ -73,6 +73,12 @@ pub struct Config {
 
     #[structopt(long, name = "Messages to show in one page", default_value = "10")]
     pub messages_per_page: u8,
+
+    #[structopt(
+        long,
+        name = "Max number of requests per minute allowed from a single IP"
+    )]
+    pub max_reqs_per_min: Option<u64>,
 }
 
 impl Config {

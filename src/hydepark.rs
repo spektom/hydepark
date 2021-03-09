@@ -3,9 +3,9 @@ use async_trait::async_trait;
 use chrono::{Duration, Utc};
 use chrono_humanize::Humanize;
 use fomat_macros::fomat;
-use lazy_static::lazy_static;
+use lazy_static::{__Deref, lazy_static};
+use lru::LruCache;
 use rand::Rng;
-
 use std::collections::HashMap;
 
 use crate::{
@@ -30,6 +30,9 @@ impl UserContext {
 lazy_static! {
     // Holds temporary session data per authenticated user.
     static ref CONTEXTS: Mutex<HashMap<i64, UserContext>> = Mutex::new(HashMap::new());
+
+    // Number of requests made from an IP address at the specified minute.
+    static ref REQ_COUNT: Mutex<LruCache<(String, u32), u64>> = Mutex::new(LruCache::new(1000));
 }
 
 pub struct Hydepark {
@@ -53,8 +56,32 @@ impl Hydepark {
             ))
     }
 
+    /// Simple request limiter that looks at how many requests came from current IP
+    /// at this minute. If the number of requests is greater than the limit,
+    /// Gemini response "slowdown" will be sent to the client.
+    async fn limit_rate(&self, request: &Request) -> std::result::Result<(), RequestError> {
+        if let Some(limit) = self.config.max_reqs_per_min {
+            let mut req_count = REQ_COUNT.lock().await;
+            let ip = request.context.remote_addr.ip().to_string();
+            let mins_since_epoch = Utc::now().timestamp() as u32 / 60;
+            let key = (ip, mins_since_epoch);
+            if let Some(count) = req_count.get_mut(&key) {
+                *count += 1;
+                if count.deref() > &limit {
+                    return Err(RequestError::UserError(
+                        ResponseStatus::SlowDown,
+                        "Too many requests",
+                    ));
+                }
+            } else {
+                req_count.put(key, 1);
+            }
+        }
+        Ok(())
+    }
+
     /// Access a session context stored for current user using callback `f`.
-    async fn map_user_context<F, R>(&self, user: &User, f: F) -> R
+    async fn with_user_context<F, R>(&self, user: &User, f: F) -> R
     where
         F: FnOnce(&mut UserContext) -> R,
     {
@@ -242,7 +269,7 @@ impl Hydepark {
         let user = self.current_user(request).await?;
         if request.param_i64("t").is_some() {
             let topic = self.param_topic(request).await?;
-            self.map_user_context(&user, |ctx| ctx.current_topic = Some(topic))
+            self.with_user_context(&user, |ctx| ctx.current_topic = Some(topic))
                 .await;
             return Ok(Response::header(
                 ResponseStatus::Input,
@@ -251,7 +278,7 @@ impl Hydepark {
         }
 
         let topic = self
-            .map_user_context(&user, |ctx| ctx.current_topic.clone())
+            .with_user_context(&user, |ctx| ctx.current_topic.clone())
             .await
             .ok_or(RequestError::UserError(
                 ResponseStatus::PermanentFailure,
@@ -304,6 +331,7 @@ impl Hydepark {
 #[async_trait]
 impl RequestMapper for Hydepark {
     async fn map_request(&self, request: &Request) -> std::result::Result<Response, RequestError> {
+        self.limit_rate(request).await?;
         match request.resource.as_str() {
             "/" => self.index(request).await,
             "/new-user" => self.new_user(request).await,
