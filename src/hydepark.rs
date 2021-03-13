@@ -1,7 +1,7 @@
 use async_std::sync::Mutex;
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
-use chrono_humanize::Humanize;
+use chrono_humanize::{Accuracy, HumanTime, Humanize, Tense};
 use fomat_macros::fomat;
 use lazy_static::{__Deref, lazy_static};
 use lru::LruCache;
@@ -45,6 +45,9 @@ impl Hydepark {
         Hydepark { config, storage }
     }
 
+    /// Returns a user according to the client certificate used in current session, or issues
+    /// relevant Gemini error if certificate doesn't exist or invalid. If current certificate
+    /// is not linked to any user account, redirect to a "new user" page is returned.
     async fn current_user(&self, request: &Request) -> std::result::Result<User, RequestError> {
         let certificate = request.client_certificate()?;
         self.storage
@@ -54,6 +57,22 @@ impl Hydepark {
                 ResponseStatus::TemporaryRedirect,
                 "/new-user",
             ))
+    }
+
+    /// Returns a user according to the client certificate used in current session.
+    /// If there's a problem with a certificate (not used or invalid), or there's no user
+    /// account linked to it - None is returned.
+    async fn current_user_opt(&self, request: &Request) -> Option<User> {
+        if let Some(cert) = request.client_certificate_opt() {
+            if let Ok(user) = self
+                .storage
+                .user_by_certificate(cert.fingerprint.as_str())
+                .await
+            {
+                return user;
+            }
+        }
+        None
     }
 
     /// Simple request limiter that looks at how many requests came from current IP
@@ -224,6 +243,25 @@ impl Hydepark {
         Ok(Response::header(ResponseStatus::TemporaryRedirect, "/"))
     }
 
+    async fn cert_update_link_user(&self, user: &User) -> Option<String> {
+        if user.cert_valid_until < Utc::now() + Duration::weeks(2) {
+            Some(fomat!(
+                "\n\n=> " (self.config.base_url.as_str())
+                "/update-cert-req Your certificate will be expired in "
+                (HumanTime::from(user.cert_valid_until).to_text_en(Accuracy::Precise, Tense::Future))))
+        } else {
+            None
+        }
+    }
+
+    async fn cert_update_link_req(&self, request: &Request) -> Option<String> {
+        if let Some(user) = self.current_user_opt(request).await {
+            self.cert_update_link_user(&user).await
+        } else {
+            None
+        }
+    }
+
     async fn new_topic(&self, request: &Request) -> std::result::Result<Response, RequestError> {
         let user = self.current_user(request).await?;
         if let Some(topic) = request.input_as_str() {
@@ -248,6 +286,7 @@ impl Hydepark {
                 self.config.messages_per_page,
             )
             .await?;
+        let cert_update_link = self.cert_update_link_req(request).await;
         let body = fomat!("# " (topic.title) "\nLast updated " (topic.update_time.humanize())
             for message in &messages {
                 "\n\n### " (message.user_name) " wrote " (message.create_time.humanize()) "\n" (message.content)
@@ -261,6 +300,7 @@ impl Hydepark {
             }
             "\n\n=> " (self.config.base_url.as_str()) "/new-message?t=" (topic.id) " New message"
             "\n\n=> " (self.config.base_url.as_str()) " Home"
+            if let Some(cert_update_link) = cert_update_link { (cert_update_link) }
         );
         Ok(Response::text(body.as_str()))
     }
@@ -308,6 +348,7 @@ impl Hydepark {
                 self.config.topics_per_page,
             )
             .await?;
+        let cert_update_link = self.cert_update_link_req(request).await;
         let body = fomat!(
             "# Welcome to Hydepark!\n\n"
             "This is a place for discussions, please be kind to each other.\n\n"
@@ -323,6 +364,7 @@ impl Hydepark {
                 "\n\n=> " (self.config.base_url.as_str()) "?p=" (page - 1) " Previous page"
             }
             "\n\n=> " (self.config.base_url.as_str()) "/new-topic New topic"
+            if let Some(cert_update_link) = cert_update_link { (cert_update_link) }
         );
         Ok(Response::text(body.as_str()))
     }

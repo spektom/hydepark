@@ -59,4 +59,4 @@ Hydepark uses client side SSL certificates for user authentication. Clients can 
 
 ### Updating client certificate
 
-When client certificate is about to be expired, navigate to `gemini://<hostname>/update-cert-req` and follow the instructions for linking a new certificate with your account.
+When client certificate is about to be expired, a warning link will be shown. Click on the link, and follow the instructions for attaching a new certificate to your account. To update the certificate explicitly, navigate to: `gemini://<hostname>/update-cert-req`.

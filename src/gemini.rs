@@ -97,6 +97,16 @@ impl Request {
             .and_then(|e| if e.0.len() > 0 { Some(e.0) } else { None })
     }
 
+    /// Returns client SSL certificate if exists in current session.
+    pub fn client_certificate_opt(&self) -> Option<ClientCertificate> {
+        match self.context.peer_certificate() {
+            Ok(cert) => cert,
+            _ => None,
+        }
+    }
+
+    /// Return client SSL certificate, or issue relevant Gemini error if client SSL certificate
+    /// is not used or if it's invalid.
     pub fn client_certificate(&self) -> std::result::Result<ClientCertificate, RequestError> {
         self.context
             .peer_certificate()
